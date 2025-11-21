@@ -1,4 +1,3 @@
-# perihelio.py
 import pygame
 import math
 import sys
@@ -6,7 +5,7 @@ import sys
 # ---------------------
 # Parámetros visuales / físicos
 # ---------------------
-ECCENTRICITY = 0.206      # Eccentricidad realista
+ECCENTRICITY = 0.3      # Eccentricidad real de Mercurio
 A = 200                    # semieje mayor en pixeles
 SCREEN_CENTER = (450, 350)
 
@@ -14,7 +13,7 @@ SCREEN_CENTER = (450, 350)
 COLOR_BG = (8, 10, 20)
 COLOR_SOL = (255, 180, 70)
 COLOR_NEWTON = (220, 220, 220, 70)
-COLOR_REL = (60, 220, 140, 255)
+COLOR_REL = (60, 220, 140)
 COLOR_PLANET = (100, 200, 255)
 COLOR_TEXT = (230, 230, 230)
 
@@ -27,10 +26,14 @@ class PerihelioSim:
         self.clock = pygame.time.Clock()
 
         # dinámica
-        self.theta = 0.0              # ángulo orbital del planeta
-        self.phi_rel = 0.0            # ángulo de la precesión relativista
-        self.speed = 0.01             # velocidad orbital
-        self.precision = 0.5          # 1 = realista, 0 = exagerado
+        self.theta = 0.0          # ángulo orbital del planeta
+        self.phi_rel = 0.0        # ángulo de precesión relativista
+        self.speed = 0.01         # velocidad orbital
+
+        # Ahora precision controla DIRECTAMENTE la precesión:
+        # precision=1 → casi sin precesión
+        # precision=0 → precesión enorme
+        self.precision = 1.0      
 
         # visibilidad
         self.show_newton = True
@@ -42,38 +45,25 @@ class PerihelioSim:
         self.trail_newton = []
         self.trail_rel = []
 
-        # fuente
         pygame.font.init()
         self.font = pygame.font.SysFont("arial", 20)
 
     # ----------------------------------------------------------
-    # Función clave: un punto de la elipse con precesión
+    # Función clave: punto de la elipse con precesión rotada
     # ----------------------------------------------------------
     def ellipse_point_with_precession(self, f1, phi, theta, a=A, e=ECCENTRICITY):
         """
-        Genera un punto de la elipse a partir de:
-        - f1: foco fijo (sol)
-        - phi: orientación del eje mayor (precesión)
-        - theta: ángulo paramétrico orbital
+        Genera un punto de una elipse rotada.
         """
-        # distancia del centro a cada foco = a*e
-        c = a * e
-
-        # Foco móvil rotado por phi (aunque no lo usamos directamente para r)
-        f2x = f1[0] + c * math.cos(phi)
-        f2y = f1[1] + c * math.sin(phi)
-
-        # Ecuación polar de la elipse rotada
         r = (a * (1 - e * e)) / (1 + e * math.cos(theta - phi))
 
-        # Convertir a coordenadas globales
         x = f1[0] + r * math.cos(theta)
         y = f1[1] + r * math.sin(theta)
         return int(x), int(y)
 
     def clear_trails(self):
-        self.trail_newton = []
-        self.trail_rel = []
+        self.trail_newton.clear()
+        self.trail_rel.clear()
 
     # ----------------------------------------------------------
     # Main loop
@@ -94,13 +84,13 @@ class PerihelioSim:
                         running = False
                         return
 
-                    # velocidad
+                    # velocidad orbital
                     if event.key == pygame.K_UP:
                         self.speed *= 1.3
                     if event.key == pygame.K_DOWN:
                         self.speed *= 0.75
 
-                    # precision (0..1)
+                    # controlar precesión: derecha aumenta precisión (menos precesión)
                     if event.key == pygame.K_RIGHT:
                         self.precision = min(1.0, self.precision + 0.05)
                     if event.key == pygame.K_LEFT:
@@ -115,25 +105,25 @@ class PerihelioSim:
                         self.show_planet_newton = not self.show_planet_newton
                     if event.key == pygame.K_r:
                         self.show_planet_rel = not self.show_planet_rel
-
                     if event.key == pygame.K_c:
                         self.clear_trails()
 
             # ----------------------------------------------
-            # Actualizar dinámica
+            # Actualizar dinámica orbital
             # ----------------------------------------------
             self.theta += self.speed
 
-            # fórmula aproximada de precesión:
-            eps = 6 * math.pi * (self.speed ** 2) / (1 - ECCENTRICITY**2)
-
-            # exageración inversa a precision
-            eps *= (1 - self.precision) * 60
-
-            self.phi_rel += eps
+            # ----------------------------------------------
+            # NUEVA precesión simple y estable:
+            # precesión máxima cuando precision = 0
+            # precesión mínima cuando precision = 1
+            # ----------------------------------------------
+            base_precession = 0.0007            # velocidad base de rotación de la elipse
+            factor = (1.0 - self.precision) * 25  # amplificador
+            self.phi_rel += base_precession * factor
 
             # ----------------------------------------------
-            # Newton (phi = 0)
+            # Newton (sin rotación)
             # ----------------------------------------------
             x_new, y_new = self.ellipse_point_with_precession(
                 SCREEN_CENTER, 0.0, self.theta
@@ -143,7 +133,7 @@ class PerihelioSim:
                 self.trail_newton.pop(0)
 
             # ----------------------------------------------
-            # Relativista (phi cambia)
+            # Relativista (la elipse rota)
             # ----------------------------------------------
             x_rel, y_rel = self.ellipse_point_with_precession(
                 SCREEN_CENTER, self.phi_rel, self.theta
@@ -153,12 +143,12 @@ class PerihelioSim:
                 self.trail_rel.pop(0)
 
             # ----------------------------------------------
-            # Dibujar Sol
+            # Sol
             # ----------------------------------------------
             pygame.draw.circle(self.screen, COLOR_SOL, SCREEN_CENTER, 20)
 
             # ----------------------------------------------
-            # Newton (trayectoria punteada suave)
+            # Newton (puntos suaves)
             # ----------------------------------------------
             if self.show_newton:
                 surfN = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
@@ -168,11 +158,10 @@ class PerihelioSim:
                 self.screen.blit(surfN, (0, 0))
 
             # ----------------------------------------------
-            # Relativista (línea continua)
+            # Relativista
             # ----------------------------------------------
-            if self.show_rel:
-                if len(self.trail_rel) > 2:
-                    pygame.draw.lines(self.screen, COLOR_REL, False, self.trail_rel, 2)
+            if self.show_rel and len(self.trail_rel) > 2:
+                pygame.draw.lines(self.screen, COLOR_REL, False, self.trail_rel, 2)
 
             # planetas
             if self.show_planet_newton:
@@ -186,9 +175,7 @@ class PerihelioSim:
             # ----------------------------------------------
             lines = [
                 f"Velocidad (Up/Down): {self.speed:.4f}",
-                f"Precision (L/R): {self.precision:.2f}",
-                f"phi_rel = {self.phi_rel:.3f} rad",
-                "",
+                f"Precision (Left/Right): {self.precision:.2f}",
                 "1: Toggle Newton   2: Toggle Relativista",
                 "N: planeta Newton  R: planeta Rel",
                 "C: limpiar         ESC: menu"
@@ -201,3 +188,13 @@ class PerihelioSim:
 
             pygame.display.flip()
             self.clock.tick(60)
+
+
+# -----------------------------------------------------------
+# Para probar directamente el módulo:
+# -----------------------------------------------------------
+if __name__ == "__main__":
+    pygame.init()
+    screen = pygame.display.set_mode((900, 700))
+    sim = PerihelioSim(screen)
+    sim.run()
