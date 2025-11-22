@@ -21,3 +21,23 @@ class Button:
     def is_hovered(self):
         mx, my = pygame.mouse.get_pos()
         return self.rect.collidepoint(mx, my)
+
+class BackButtonUI:
+    def __init__(self, x=12, y=12):
+        self.rect = pygame.Rect(x, y, 42, 42)
+
+    def draw(self, screen):
+        # círculo
+        pygame.draw.circle(screen, (30, 30, 30, 180), self.rect.center, 21)
+        pygame.draw.circle(screen, (80, 80, 90), self.rect.center, 21, 2)
+
+        # flecha "<"
+        cx, cy = self.rect.center
+        pygame.draw.line(screen, (240, 240, 255), (cx + 6, cy - 10), (cx - 6, cy), 3)
+        pygame.draw.line(screen, (240, 240, 255), (cx - 6, cy), (cx + 6, cy + 10), 3)
+
+    def handle(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if self.rect.collidepoint(event.pos):
+                return True
+        return False

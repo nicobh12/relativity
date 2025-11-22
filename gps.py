@@ -2,6 +2,7 @@ import pygame
 import math
 import random
 import sys
+from ui_elements import BackButtonUI
 
 # ---------- CONSTANTES ----------
 RE = 6371  # Radio terrestre en km
@@ -101,6 +102,7 @@ class GPSSim:
         self.screen = screen
         self.W, self.H = screen.get_size()
         self.clock = pygame.time.Clock()
+        self.btn_back = BackButtonUI()
 
         # estrellas
         self.stars = gen_stars(self.W, self.H, 150)
@@ -174,6 +176,8 @@ class GPSSim:
                     pygame.quit()
                     sys.exit()
                 if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+                    return
+                if self.btn_back.handle(ev):
                     return
 
                 self.slider_mass.handle(ev)
@@ -252,5 +256,6 @@ class GPSSim:
             self.slider_mass.draw(self.screen)
             self.slider_distance.draw(self.screen)
 
+            self.btn_back.draw(self.screen)
             pygame.display.flip()
             self.clock.tick(60)

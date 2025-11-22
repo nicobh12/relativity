@@ -3,6 +3,7 @@ import pygame
 import math
 import random
 import sys
+from ui_elements import BackButtonUI
 from config import BACKGROUND, WHITE, YELLOW, RED
 
 # ================================
@@ -144,6 +145,7 @@ class PerihelioSim:
         self.screen = screen
         self.W, self.H = screen.get_size()
         self.clock = pygame.time.Clock()
+        self.btn_back = BackButtonUI()
 
         # stars
         self.stars = gen_stars(self.W, self.H, 140)
@@ -191,6 +193,8 @@ class PerihelioSim:
                     pygame.quit()
                     sys.exit()
                 if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+                    return
+                if self.btn_back.handle(ev):
                     return
 
                 self.slider_speed.handle(ev)
@@ -299,4 +303,5 @@ class PerihelioSim:
             self.slider_speed.draw(self.screen)
             self.slider_precision.draw(self.screen)
 
+            self.btn_back.draw(self.screen)
             pygame.display.flip()
