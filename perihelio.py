@@ -38,7 +38,7 @@ class PerihelioSim:
         # visibilidad
         self.show_newton = True
         self.show_rel = True
-        self.show_planet_newton = False
+        self.show_planet_newton = True
         self.show_planet_rel = True
 
         # trails

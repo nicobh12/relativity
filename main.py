@@ -2,7 +2,8 @@ import pygame
 import sys
 from ui_elements import Button
 from perihelio import PerihelioSim
-# (en el futuro: from gps import GPSSim)
+from gps import GPSSim
+
 
 pygame.init()
 
@@ -43,7 +44,7 @@ def main_menu():
                     PerihelioSim(screen).run()
 
                 if gps_btn.is_hovered():
-                    print("GPS aún no está implementado >:)")
+                    GPSSim(screen).run()
 
         pygame.display.flip()
         clock.tick(60)
