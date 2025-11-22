@@ -1,204 +1,256 @@
 import pygame
 import math
+import random
 import sys
-from ui_elements import Button
 
-# ---------------------------------------
-# Parámetros
-# ---------------------------------------
-WIDTH, HEIGHT = 900, 700
-CENTER = (WIDTH // 2 - 120, HEIGHT // 2)
-
-# distancia típica GPS ~ 26,600 km de altitud
-GPS_MIN = 1.5e7       # mínimo (m)
-GPS_MAX = 3.5e7       # máximo (m)
-
-# masas: 0.5 a 3 masas terrestres
-MASS_MIN = 0.5
-MASS_MAX = 3.0
-
-COLOR_BG = (8, 10, 20)
-COLOR_TEXT = (230, 230, 230)
+# ---------- CONSTANTES ----------
+RE = 6371  # Radio terrestre en km
+G = 6.67430e-11
+M_earth = 5.972e24
 
 
-# ----------------------------------------------------
-# Clase Slider sencilla
-# ----------------------------------------------------
+def earth_masses_to_kg(m):
+    return m * M_earth
+
+
+# ============================================================
+# ★★★ VISUALS: ESTRELLAS + GRADIENT + GLOW (igual a perihelio)
+# ============================================================
+def draw_radial_gradient(surface, center, radius, inner, outer):
+    cx, cy = center
+    for r in range(radius, 0, -1):
+        t = r / radius
+        color = (
+            int(inner[0] * t + outer[0] * (1 - t)),
+            int(inner[1] * t + outer[1] * (1 - t)),
+            int(inner[2] * t + outer[2] * (1 - t)),
+        )
+        pygame.draw.circle(surface, color, (cx, cy), r)
+
+
+def gen_stars(w, h, n=120):
+    return [(random.randint(0, w), random.randint(0, h),
+             random.choice([1, 1, 2])) for _ in range(n)]
+
+
+def draw_stars(surface, stars, phase):
+    for x, y, s in stars:
+        tw = 0.5 + 0.5 * math.sin((x * 11 + y * 5 + phase) * 0.002)
+        size = max(1, int(s * tw))
+        pygame.draw.circle(surface, (255, 255, 255), (x, y), size)
+
+
+# ============================================================
+# ★★★ SLIDER (gps-style, mismo al de perihelio)
+# ============================================================
 class Slider:
-    def __init__(self, x, y, w, h, min_val, max_val, start_val, label):
-        self.rect = pygame.Rect(x, y, w, h)
-        self.min_val = min_val
-        self.max_val = max_val
+    def __init__(self, x, y, w, min_val, max_val, start_val,
+                 step=0.1, label="", ticks=None):
+
+        self.rect = pygame.Rect(x, y, w, 12)
+        self.grab_rect = pygame.Rect(x, y - 12, w, 36)
+
+        self.min = min_val
+        self.max = max_val
         self.value = start_val
         self.label = label
-        self.dragging = False
+        self.step = step
+        self.ticks = ticks or []
+        self.font = pygame.font.SysFont("arial", 18)
+        self.grabbed = False
 
-        # posición inicial en píxeles
-        self.handle_x = x + int((start_val - min_val) / (max_val - min_val) * w)
-
-        self.font = pygame.font.SysFont("arial", 20)
+    def handle(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if self.grab_rect.collidepoint(event.pos):
+                self.grabbed = True
+        elif event.type == pygame.MOUSEBUTTONUP:
+            self.grabbed = False
+        elif event.type == pygame.MOUSEMOTION and self.grabbed:
+            mx = max(self.rect.left, min(event.pos[0], self.rect.right))
+            t = (mx - self.rect.left) / self.rect.width
+            raw = self.min + t * (self.max - self.min)
+            self.value = round(raw / self.step) * self.step
 
     def draw(self, screen):
-        # línea
-        pygame.draw.line(screen, (180, 180, 180),
-                         (self.rect.x, self.rect.y + self.rect.height // 2),
-                         (self.rect.x + self.rect.width, self.rect.y + self.rect.height // 2), 4)
+        # label
+        txt = f"{self.label}: {self.value:.2f}"
+        screen.blit(self.font.render(txt, True, (220, 230, 255)),
+                    (self.rect.x, self.rect.y - 25))
+
+        # baseline
+        pygame.draw.rect(screen, (220, 220, 240), self.rect)
+
+        # ticks
+        for tval in self.ticks:
+            px = self.rect.x + (tval - self.min) / (self.max - self.min) * self.rect.width
+            pygame.draw.line(screen, (140, 150, 200),
+                             (px, self.rect.y - 6),
+                             (px, self.rect.y + 6), 2)
 
         # handle
-        pygame.draw.circle(screen, (120, 200, 255),
-                           (self.handle_x, self.rect.y + self.rect.height // 2), 10)
-
-        # label
-        label = self.font.render(
-            f"{self.label}: {self.value:.2f}", True, (230, 230, 230))
-        screen.blit(label, (self.rect.x, self.rect.y - 24))
-
-    def update(self, event):
-        mx, my = pygame.mouse.get_pos()
-
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if abs(mx - self.handle_x) < 12 and abs(my - (self.rect.y + self.rect.height // 2)) < 12:
-                self.dragging = True
-
-        if event.type == pygame.MOUSEBUTTONUP:
-            self.dragging = False
-
-        if event.type == pygame.MOUSEMOTION and self.dragging:
-            # actualizar handle
-            self.handle_x = max(self.rect.x, min(mx, self.rect.x + self.rect.width))
-
-            # convertir a valor
-            t = (self.handle_x - self.rect.x) / self.rect.width
-            self.value = self.min_val + t * (self.max_val - self.min_val)
+        t = (self.value - self.min) / (self.max - self.min)
+        hx = self.rect.x + int(t * self.rect.width)
+        pygame.draw.circle(screen, (100, 150, 255), (hx, self.rect.y + 6), 10)
 
 
-# ----------------------------------------------------
-# Simulador GPS
-# ----------------------------------------------------
+# ============================================================
+# ★★★ SIMULACIÓN GPS
+# ============================================================
 class GPSSim:
     def __init__(self, screen):
         self.screen = screen
+        self.W, self.H = screen.get_size()
         self.clock = pygame.time.Clock()
 
-        pygame.font.init()
+        # estrellas
+        self.stars = gen_stars(self.W, self.H, 150)
+        self.star_phase = 0
+
+        # ----- sliders -----
+        self.slider_radius = Slider(
+            self.W - 320, 40, 260,
+            0.3 * RE, 3.0 * RE, 1.0 * RE,
+            step=0.05 * RE,
+            label="Radio (km)",
+            ticks=[0.5*RE, 1*RE, 1.5*RE, 2*RE, 2.5*RE, 3*RE]
+        )
+
+        self.slider_mass = Slider(
+            self.W - 320, 120, 260,
+            0.5, 3.0, 1.0,
+            step=0.1,
+            label="Masa (M_e)",
+            ticks=[0.5, 1, 1.5, 2, 2.5, 3]
+        )
+
+        self.slider_distance = Slider(
+            self.W - 320, 200, 260,
+            1.1 * RE, 6.0 * RE, 4.0 * RE,
+            step=0.1 * RE,
+            label="Altura satélite (km)",
+            ticks=[1.5*RE, 2*RE, 3*RE, 4*RE, 5*RE, 6*RE]
+        )
+
+        # imágenes
+        self.planet_img = self.safe_load("earth.png", 50)
+        self.sat_img = self.safe_load("sat.png", 20)
+
         self.font = pygame.font.SysFont("arial", 20)
-        self.info_font = pygame.font.SysFont("arial", 18)
+        self.small = pygame.font.SysFont("arial", 16)
 
-        # sliders
-        self.mass_slider = Slider(WIDTH - 260, 40, 200, 20, MASS_MIN, MASS_MAX, 1.0, "Masa (Tierras)")
-        self.dist_slider = Slider(WIDTH - 260, 120, 200, 20, GPS_MIN, GPS_MAX, 2.6e7, "Distancia (m)")
-
-        # ángulo del satélite
-        self.theta = 0.0
-
-        # cargar imágenes, o dibujar formas si no existen
-        self.planet_img = self.safe_load("earth.png", radius=70)
-        self.sat_img = self.safe_load("sat.png", radius=18)
-
-    # carga png o crea círculo si no existe
-    def safe_load(self, path, radius):
+    def safe_load(self, path, r):
         try:
-            img = pygame.image.load(path).convert_alpha()
-            return img
+            im = pygame.image.load(path).convert_alpha()
+            return im
         except:
-            surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
-            pygame.draw.circle(surf, (100, 150, 255), (radius, radius), radius)
+            surf = pygame.Surface((r*2, r*2), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (100, 150, 255), (r, r), r)
             return surf
 
+    # ----------------- FÍSICA RELATIVISTA -----------------
+    def compute_relativistic_drift(self, mass_earths, r_km, planet_r_km):
+        M = earth_masses_to_kg(mass_earths)
+        r = r_km * 1000
+        c = 299792458
+
+        # velocidad orbital newtoniana
+        v = math.sqrt(G * M / r)
+
+        # dilataciones
+        dt_grav = G*M/(c*c) * (1/r - 1/(planet_r_km*1000))
+        dt_vel = -v*v/(2*c*c)
+
+        total = dt_grav + dt_vel
+        return total*86400*1e6, dt_grav*86400*1e6, dt_vel*86400*1e6
+
+    # ----------------- MAIN LOOP -----------------
     def run(self):
         running = True
+        angle = 0
 
         while running:
-            self.screen.fill(COLOR_BG)
-
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
+            for ev in pygame.event.get():
+                if ev.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
-
-                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
                     return
 
-                # sliders
-                self.mass_slider.update(event)
-                self.dist_slider.update(event)
+                self.slider_mass.handle(ev)
+                self.slider_radius.handle(ev)
+                self.slider_distance.handle(ev)
 
-            # -----------------------------------------
-            # Actualizar dinámica
-            # -----------------------------------------
-            self.theta += 0.01
+            # ==== fondo estrellado ====
+            draw_radial_gradient(
+                self.screen,
+                (self.W//2, self.H//2),
+                max(self.W, self.H),
+                (15, 15, 30),
+                (5, 5, 15)
+            )
 
-            # tamaño del planeta según masa
-            mass = self.mass_slider.value
-            base_size = 160
-            scale = 0.6 + 0.4 * (mass - MASS_MIN) / (MASS_MAX - MASS_MIN)
-            planet_size = int(base_size * scale)
-            planet_img = pygame.transform.smoothscale(self.planet_img, (planet_size, planet_size))
+            self.star_phase += 0.35
+            draw_stars(self.screen, self.stars, self.star_phase)
 
-            # posición del planeta
-            planet_rect = planet_img.get_rect(center=CENTER)
-            self.screen.blit(planet_img, planet_rect)
+            # ==== valores ====
+            R = self.slider_radius.value
+            M = self.slider_mass.value
+            D = self.slider_distance.value
 
-            # distancia visual del satélite
-            dist = self.dist_slider.value
-            visual_r = 120 + 140 * (dist - GPS_MIN) / (GPS_MAX - GPS_MIN)
+            # ==== planeta ====
+            cx, cy = self.W//3, self.H//2
+            scale = int(R / 100)
+            planet = pygame.transform.scale(self.planet_img, (scale, scale))
+            self.screen.blit(planet, planet.get_rect(center=(cx, cy)))
 
-            # coordenadas del satélite
-            sx = CENTER[0] + visual_r * math.cos(self.theta)
-            sy = CENTER[1] + visual_r * math.sin(self.theta)
+            # ==== órbita ====
+            r_px = int(D / 100)
+            pygame.draw.circle(self.screen, (120, 120, 160), (cx, cy), r_px, 1)
 
-            # dibujar satélite
-            sat_rect = self.sat_img.get_rect(center=(sx, sy))
-            self.screen.blit(self.sat_img, sat_rect)
+            angle += 0.01
+            sx = cx + r_px*math.cos(angle)
+            sy = cy + r_px*math.sin(angle)
 
-            # -----------------------------------------
-            # Cálculo físico: correcciones relativistas
-            # -----------------------------------------
-            G = 6.674e-11
-            M = mass * 5.97e24
-            r = dist
+            sat = pygame.transform.scale(self.sat_img, (38, 38))
+            self.screen.blit(sat, sat.get_rect(center=(sx, sy)))
 
-            # Relatividad general (curvatura gravitacional)
-            GR = - (3 * G * M) / (r * 3e8**2)
+            # ==== relatividad ====
+            total, grav, vel = self.compute_relativistic_drift(M, D, R)
 
-            # Relatividad especial (velocidad del satélite)
-            v = math.sqrt(G * M / r)
-            SR = - (v**2) / (2 * 3e8**2)
+            # ==== panel info ====
+            box_x, box_y = self.W - 360, 260
+            box_w, box_h = 330, 380
+            pygame.draw.rect(self.screen, (20, 20, 40, 220),
+                             (box_x, box_y, box_w, box_h), border_radius=12)
 
-            total = (GR + SR) * 86400 * 1e9  # nanosegundos por día
-
-            # -----------------------------------------
-            # Recuadro informativo
-            # -----------------------------------------
-            info_box = pygame.Surface((420, 260), pygame.SRCALPHA)
-            pygame.draw.rect(info_box, (30, 30, 50, 180), (0, 0, 420, 260), border_radius=12)
-
-            text = [
-                f"Corrección relativista total: {total:+.2f} ns/día",
+            info = [
+                f"Masa planeta: {M:.1f} M_e",
+                f"Radio planeta: {R:,.0f} km",
+                f"Altura satélite: {D-R:,.0f} km",
                 "",
-                f"GR (curvatura gravitacional): {GR*86400*1e9:+.2f} ns/día",
-                f"SR (velocidad del satélite): {SR*86400*1e9:+.2f} ns/día",
+                "Ajuste relativista:",
+                f"{total: .3f} µs/día",
                 "",
-                "Explicación:",
-                " • La gravedad más intensa hace que los relojes en órbita",
-                "   avancen más rápido que en la superficie (GR).",
-                " • La velocidad del satélite hace que su reloj avance",
-                "   más lento (SR).",
-                " • La suma produce un desfase que debe corregirse para",
-                "   que el GPS mantenga precisión en las coordenadas."
+                "Desglose:",
+                f"  Grav.:  {grav: .3f} µs/día",
+                f"  Vel.:   {vel: .3f} µs/día",
+                "",
+                "• Campo gravitacional acelera",
+                "  el reloj del satélite.",
+                "• La velocidad orbital lo retarda.",
+                "• GPS corrige esta diferencia."
             ]
 
-            y = 10
-            for line in text:
-                img = self.info_font.render(line, True, COLOR_TEXT)
-                info_box.blit(img, (10, y))
-                y += 20
+            y = box_y + 15
+            for line in info:
+                self.screen.blit(self.small.render(line, True, (230, 230, 250)),
+                                 (box_x + 10, y))
+                y += 22
 
-            self.screen.blit(info_box, (WIDTH - 420 - 20, HEIGHT - 300))
-
-            # sliders
-            self.mass_slider.draw(self.screen)
-            self.dist_slider.draw(self.screen)
+            # ==== sliders ====
+            self.slider_radius.draw(self.screen)
+            self.slider_mass.draw(self.screen)
+            self.slider_distance.draw(self.screen)
 
             pygame.display.flip()
             self.clock.tick(60)

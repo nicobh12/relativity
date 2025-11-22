@@ -7,7 +7,7 @@ from gps import GPSSim
 
 pygame.init()
 
-WIDTH, HEIGHT = 900, 700
+WIDTH, HEIGHT = 1000, 700
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Simulador de Relatividad General")
 
